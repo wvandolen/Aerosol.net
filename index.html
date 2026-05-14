@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Matrix Aerosol - High Speed Edition</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body, html { width: 100%; height: 100%; overflow: hidden; background: #d0d0d0; font-family: 'Courier New', monospace; display: flex; align-items: center; justify-content: center; }
+        
+        #menuContainer {
+            position: absolute;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #ffffff;
+            background-image: linear-gradient(#b0b0b0 1px, transparent 1px), linear-gradient(90deg, #b0b0b0 1px, transparent 1px);
+            background-size: 16px 16px;
+            background-position: center;
+            z-index: 100;
+        }
+
+        canvas { 
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw; 
+            height: 100vh; 
+            background: #ffffff; 
+            image-rendering: pixelated;
+            display: none;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        #startMenu {
+            position: relative;
+            width: 440px;
+            background: #ffffff;
+            border: 6px double #000000; 
+            padding: 30px;
+            color: #000000;
+            text-align: center;
+            transform-style: preserve-3d;
+            transform: perspective(1000px) rotateX(0deg) rotateY(0deg);
+        }
+        #startMenu h1 {
+            font-size: 28px;
+            color: #000000;
+            margin-bottom: 2px;
+            letter-spacing: 2px;
+            font-weight: 900;
+            text-transform: uppercase;
+            text-shadow: 2px 2px 0px #b0b0b0;
+        }
+        #startMenu .subtitle {
+            font-size: 11px;
+            color: #000000;
+            margin-bottom: 30px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        
+        .config-label { font-size: 11px; font-weight: bold; text-align: left; margin-bottom: 10px; color: #000000; text-transform: uppercase; }
+        .color-picker-grid { display: flex; gap: 12px; justify-content: center; margin-bottom: 30px; }
+        
+        .color-swatch {
+            width: 36px; height: 36px; border: 3px solid #000000; cursor: pointer; transition: transform 0.05s ease;
+        }
+        .color-swatch:hover { transform: scale(1.05); }
+        .color-swatch.active { 
+            box-shadow: inset 0 0 0 4px #ffffff; 
+        }
+
+        #startBtn {
+            width: 100%;
+            background: #000000;
+            color: #ffffff;
+            border: 3px solid #000000;
+            padding: 14px 0;
+            font-family: inherit;
+            font-weight: bold;
+            font-size: 14px;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            box-shadow: 6px 6px 0px #b0b0b0;
+        }
+        #startBtn:hover {
+            background: #ffffff;
+            color: #000000;
+            box-shadow: 4px 4px 0px #000000;
+        }
+
+        #hud { 
+            position: absolute; 
+            top: 24px; 
+            left: 24px; 
+            background: #ffffff; 
+            border: 3px solid #000000; 
+            padding: 14px; 
+            color: #000000; 
+            font-size: 11px; 
+            font-weight: bold; 
+            line-height: 1.5; 
+            box-shadow: 4px 4px 0px #b0b0b0; 
+            pointer-events: none;
+            display: none;
+            z-index: 50;
+        }
+        .dead-banner { color: #dc2626; font-size: 11px; display: none; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+    <div id="menuContainer">
+        <div id="startMenu">
+            <h1>AEROSOL.NET</h1>
+            <div class="subtitle">PRESS START TO PLAY</div>
+            
+            <div class="config-label">SELECT PALETTE HUE:</div>
+            <div class="color-picker-grid">
+                <div class="color-swatch active" style="background: #2563eb;" data-color="#2563eb"></div>
+                <div class="color-swatch" style="background: #db2777;" data-color="#db2777"></div>
+                <div class="color-swatch" style="background: #ea580c;" data-color="#ea580c"></div>
+                <div class="color-swatch" style="background: #16a34a;" data-color="#16a34a"></div>
+                <div class="color-swatch" style="background: #7c3aed;" data-color="#7c3aed"></div>
+            </div>
+
+            <button id="startBtn">START SYSTEM</button>
+        </div>
+    </div>
+
+    <div id="hud">
+        SYS.STATE: VELOCITY_BOOST<br>
+        COORDS  : X:<span id="valX">0</span> | Y:<span id="valY">0</span><br>
+        COVERAGE: <span id="coverageDisplay">0.00%</span> of local grid<br>
+        BONUS PT: <span id="bonusScoreDisplay">0</span> pts<br>
+        TRACK   : <span id="songSectionDisplay">INTRO</span> (Beat:<span id="beatDisplay">0</span>)<br><br>
+        <div id="statusText">CONTROLS: WASD / ARROWS</div>
+        <div id="retryBanner" class="dead-banner">TRAIL OVERWRITTEN / SEVERED!<br>TAP [R] TO FORCE REBOOT</div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const menuContainer = document.getElementById('menuContainer');
+        const startMenu = document.getElementById('startMenu');
+        const hud = document.getElementById('hud');
+        const startBtn = document.getElementById('startBtn');
+        const swatches = document.querySelectorAll('.color-swatch');
+
+        const layerCanvas = document.createElement('canvas');
+        const layerCtx = layerCanvas.getContext('2d');
+        
+        const WORLD_SIZE = 4000;
+        layerCanvas.width = WORLD_SIZE;
+        layerCanvas.height = WORLD_SIZE;
+
+        layerCtx.fillStyle = '#ffffff';
+        layerCtx.fillRect(0, 0, WORLD_SIZE, WORLD_SIZE);
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        window.addEventListener('mousemove', (e) => {
+            if (menuContainer.style.display === 'none') return;
+            let cx = e.clientX - window.innerWidth / 2;
+            let cy = e.clientY - window.innerHeight / 2;
+            menuContainer.style.backgroundPosition = `${50 + cx * -0.04}px ${50 + cy * -0.04}px`;
+            let rotateX = (cy / window.innerHeight) * -25; 
+            let rotateY = (cx / window.innerWidth) * 25;   
+            startMenu.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg)`;
+        });
+
+        const MICRO_GRID_SPACING = 12; 
+        let gameActive = false;
+        let selectedPlayerColor = '#2563eb';
+        let audioCtx = null, nextNoteTime = 0.0, current16thNote = 0, absoluteBeatsCount = 0;
+        let clockInterval = null;
+        let safeSpawnFrames = 0, scanTimer = 0;
+        let bonusScore = 0;
+
+        let player = { x: WORLD_SIZE/2, y: WORLD_SIZE/2, vx: 5.2, vy: 0, speed: 5.2, radius: 7, color: '#2563eb' };
+        let bots = [];
+        let botPaintNodes = []; 
+        let mathAnomalies = [];
+        const TOTAL_BOTS = 12;
+
+        swatches.forEach(swatch => {
+            swatch.addEventListener('click', () => {
+                swatches.forEach(s => s.classList.remove('active'));
+                swatch.classList.add('active');
+                selectedPlayerColor = swatch.getAttribute('data-color');
+            });
+        });
+
+        // --- ENHANCED MUSIC ENGINE ---
+        const AMINOR_SCALE = [220.00, 246.94, 261.63, 293.66, 329.63, 392.00, 440.00]; 
+        const CHORUS_LEAD = [440.00, 523.25, 587.33, 659.25, 783.99];
+
+        function playTone(freq, type, gainStart, duration, time, release = 0.05) {
+            let osc = audioCtx.createOscillator();
+            let gainNode = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, time);
+            gainNode.gain.setValueAtTime(gainStart, time);
+            gainNode.gain.exponentialRampToValueAtTime(0.0001, time + duration);
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            osc.start(time);
+            osc.stop(time + duration + release);
+        }
+
+        function playSnare(time) {
+            let bufferSize = audioCtx.sampleRate * 0.1;
+            let buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            let data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+            let noise = audioCtx.createBufferSource();
+            noise.buffer = buffer;
+            let filter = audioCtx.createBiquadFilter();
+            filter.type = 'highpass';
+            filter.frequency.setValueAtTime(1000, time);
+            let gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(0.03, time);
+            gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.1);
+            noise.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
+            noise.start(time);
+        }
+
+        function playHiHat(time, intense = false) {
+            let bufferSize = audioCtx.sampleRate * 0.05;
+            let buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            let data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+            let noiseNode = audioCtx.createBufferSource();
+            noiseNode.buffer = buffer;
+            let filter = audioCtx.createBiquadFilter();
+            filter.type = 'highpass';
+            filter.frequency.setValueAtTime(intense ? 4000 : 8000, time);
+            let gainNode = audioCtx.createGain();
+            gainNode.gain.setValueAtTime(intense ? 0.015 : 0.008, time);
+            gainNode.gain.exponentialRampToValueAtTime(0.0001, time + 0.04);
+            noiseNode.connect(filter); filter.connect(gainNode); gainNode.connect(audioCtx.destination);
+            noiseNode.start(time);
+        }
+
+        function scheduler() {
+            while (nextNoteTime < audioCtx.currentTime + 0.1) {
+                scheduleNote(current16thNote, nextNoteTime);
+                nextNoteTime += 0.125; 
+                current16thNote = (current16thNote + 1) % 16;
+                if (current16thNote === 0) absoluteBeatsCount++;
+            }
+        }
+
+        function scheduleNote(step, time) {
+            if (!gameActive) return;
+            
+            let section = "";
+            let measure = absoluteBeatsCount % 64; 
+
+            if (measure < 16) {
+                section = "ACT I: INTRO PULSE";
+                if (step % 4 === 0) playTone(AMINOR_SCALE[0] * 0.5, 'sine', 0.04, 0.2, time);
+                if (step % 8 === 4) playHiHat(time);
+            } 
+            else if (measure < 32) {
+                section = "ACT II: DATA VERSE";
+                let bassNote = step % 6 === 0 ? AMINOR_SCALE[2] * 0.5 : AMINOR_SCALE[0] * 0.5;
+                if (step % 4 === 0 || step === 6) playTone(bassNote, 'square', 0.02, 0.1, time);
+                if (step % 2 === 0) playHiHat(time);
+                if (step === 8) playSnare(time);
+            } 
+            else if (measure < 48) {
+                section = "ACT III: PEAK CHORUS";
+                if (step % 4 === 0) playTone(55, 'triangle', 0.06, 0.15, time); 
+                if (step % 8 === 4 || step % 8 === 12) playSnare(time); 
+                playHiHat(time, true); 
+                
+                if (step % 3 === 0) {
+                    let mel = CHORUS_LEAD[Math.floor(Math.random() * CHORUS_LEAD.length)];
+                    playTone(mel, 'sawtooth', 0.015, 0.2, time);
+                }
+            } 
+            else {
+                section = "ACT IV: SYSTEM BRIDGE";
+                if (step % 4 === 2) playHiHat(time, true);
+                if (step % 16 === 0) playTone(AMINOR_SCALE[4], 'sine', 0.03, 0.8, time);
+            }
+
+            document.getElementById('songSectionDisplay').innerText = section;
+            document.getElementById('beatDisplay').innerText = measure;
+        }
+
+        // --- FIXED COVERAGE LOGIC START ---
+        function hexToRgb(hex) {
+            let result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : null;
+        }
+
+        function runPixelCoverageScan() {
+            let rgbTarget = hexToRgb(player.color);
+            if (!rgbTarget) return;
+
+            let scanSize = 800;
+            let startX = Math.max(0, Math.floor(player.x - scanSize / 2));
+            let startY = Math.max(0, Math.floor(player.y - scanSize / 2));
+            
+            if (startX + scanSize > WORLD_SIZE) startX = WORLD_SIZE - scanSize;
+            if (startY + scanSize > WORLD_SIZE) startY = WORLD_SIZE - scanSize;
+
+            try {
+                let imgData = layerCtx.getImageData(startX, startY, scanSize, scanSize).data;
+                let matchCount = 0;
+                let totalPixels = scanSize * scanSize;
+
+                for (let i = 0; i < imgData.length; i += 4) {
+                    if (imgData[i] === rgbTarget.r && 
+                        imgData[i+1] === rgbTarget.g && 
+                        imgData[i+2] === rgbTarget.b) {
+                        matchCount++;
+                    }
+                }
+                let coveragePct = (matchCount / totalPixels) * 100;
+                document.getElementById('coverageDisplay').innerText = coveragePct.toFixed(2) + "%";
+            } catch(e) {}
+        }
+
+        function initAdvancedAudioEngine() {
+            if (audioCtx) return;
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            nextNoteTime = audioCtx.currentTime;
+            clockInterval = setInterval(scheduler, 25);
+        }
+
+        function spawnNetworkedBots() {
+            bots = []; botPaintNodes = [];
+            const botColors = ['#db2777', '#ea580c', '#16a34a', '#7c3aed', '#e11d48', '#4f46e5'];
+            for(let i=0; i<TOTAL_BOTS; i++) {
+                let angle = Math.random() * Math.PI * 2;
+                let distance = 800 + Math.random() * 400; 
+                bots.push({
+                    x: WORLD_SIZE/2 + Math.cos(angle) * distance,
+                    y: WORLD_SIZE/2 + Math.sin(angle) * distance,
+                    vx: 2.8, vy: 0, speed: 2.8, radius: 7,
+                    color: botColors[i % botColors.length],
+                    changeTimer: 0
+                });
+            }
+        }
+
+        function spawnMathAnomalies() {
+            mathAnomalies = [];
+            const labels = ["e^(iπ) + 1 = 0", "φ = (1+√5)/2", "∇·E = ρ/ε_0", "∮B·dl = μ_0*I", "i² = -1"];
+            for (let i = 0; i < labels.length; i++) {
+                let angle = Math.random() * Math.PI * 2;
+                let d = 300 + Math.random() * 600;
+                mathAnomalies.push({
+                    text: labels[i], x: WORLD_SIZE/2 + Math.cos(angle) * d, y: WORLD_SIZE/2 + Math.sin(angle) * d,
+                    baseY: WORLD_SIZE/2 + Math.sin(angle) * d, bobOffset: Math.random() * 100, collected: false
+                });
+            }
+        }
+
+        startBtn.addEventListener('click', () => {
+            menuContainer.style.display = 'none';
+            canvas.style.display = 'block';
+            canvas.style.pointerEvents = 'auto'; 
+            hud.style.display = 'block';
+            player.color = selectedPlayerColor;
+            resetSimEnvironment();
+            initAdvancedAudioEngine(); 
+        });
+
+        function resetSimEnvironment() {
+            player.x = WORLD_SIZE/2; player.y = WORLD_SIZE/2;
+            player.vx = player.speed; player.vy = 0;
+            safeSpawnFrames = 0; scanTimer = 0; bonusScore = 0;
+            absoluteBeatsCount = 0;
+            document.getElementById('bonusScoreDisplay').innerText = bonusScore;
+            layerCtx.fillStyle = '#ffffff';
+            layerCtx.fillRect(0, 0, WORLD_SIZE, WORLD_SIZE);
+            spawnNetworkedBots();
+            spawnMathAnomalies();
+            gameActive = true;
+            document.getElementById('retryBanner').style.display = 'none';
+            document.getElementById('statusText').style.display = 'block';
+        }
+
+        window.addEventListener('keydown', (e) => {
+            let key = e.key.toLowerCase();
+            if (key === 'r') { resetSimEnvironment(); return; }
+            if (!gameActive) return;
+            if ((key === 'w' || e.key === 'ArrowUp') && player.vy === 0) { player.vx = 0; player.vy = -player.speed; }
+            if ((key === 's' || e.key === 'ArrowDown') && player.vy === 0) { player.vx = 0; player.vy = player.speed; }
+            if ((key === 'a' || e.key === 'ArrowLeft') && player.vx === 0) { player.vx = -player.speed; player.vy = 0; }
+            if ((key === 'd' || e.key === 'ArrowRight') && player.vx === 0) { player.vx = player.speed; player.vy = 0; }
+        });
+
+        function stampAerosolInkDrop(ctxLayer, x, y, color, radius, isBot = false) {
+            for (let i = 0; i < 6; i++) {
+                let angle = Math.random() * Math.PI * 2;
+                let spread = Math.random() * (radius * 1.5);
+                let dropX = x + Math.cos(angle) * spread;
+                let dropY = y + Math.sin(angle) * spread;
+                ctxLayer.fillStyle = color;
+                ctxLayer.beginPath();
+                ctxLayer.arc(dropX, dropY, Math.random() * 2 + 0.5, 0, Math.PI * 2);
+                ctxLayer.fill();
+                if (isBot) botPaintNodes.push({ x: dropX, y: dropY });
+            }
+        }
+
+        function loop() {
+            if (gameActive) {
+                safeSpawnFrames++; scanTimer++;
+                player.x += player.vx; player.y += player.vy;
+                if(player.x < 20) player.x = 20; if(player.x > WORLD_SIZE-20) player.x = WORLD_SIZE-20;
+                if(player.y < 20) player.y = 20; if(player.y > WORLD_SIZE-20) player.y = WORLD_SIZE-20;
+                stampAerosolInkDrop(layerCtx, player.x, player.y, player.color, player.radius, false);
+
+                if (scanTimer % 60 === 0) runPixelCoverageScan();
+
+                mathAnomalies.forEach(anomaly => {
+                    if (anomaly.collected) return;
+                    anomaly.bobOffset += 0.05;
+                    anomaly.y = anomaly.baseY + Math.sin(anomaly.bobOffset) * 12;
+                    let dX = player.x - anomaly.x; let dY = player.y - anomaly.y;
+                    if (dX*dX + dY*dY < 40 * 40) { 
+                        anomaly.collected = true; bonusScore += 500;
+                        document.getElementById('bonusScoreDisplay').innerText = bonusScore;
+                    }
+                });
+
+                if (safeSpawnFrames > 60) {
+                    for (let node of botPaintNodes) {
+                        let dx = player.x - node.x; let dy = player.y - node.y;
+                        if (dx*dx + dy*dy < (player.radius * 0.95) * (player.radius * 0.95)) {
+                            gameActive = false;
+                            document.getElementById('statusText').style.display = 'none';
+                            document.getElementById('retryBanner').style.display = 'block';
+                            break;
+                        }
+                    }
+                }
+
+                bots.forEach(bot => {
+                    bot.x += bot.vx; bot.y += bot.vy; bot.changeTimer++;
+                    if(bot.x < 40 || bot.x > WORLD_SIZE-40 || bot.y < 40 || bot.y > WORLD_SIZE-40) {
+                        bot.vx = -bot.vx; bot.vy = -bot.vy;
+                    }
+                    if(bot.changeTimer > Math.random() * 50 + 40) {
+                        bot.changeTimer = 0;
+                        let choices = [{x: bot.speed, y:0}, {x:-bot.speed, y:0}, {x:0, y:bot.speed}, {x:0, y:-bot.speed}];
+                        let pick = choices[Math.floor(Math.random() * choices.length)];
+                        bot.vx = pick.x; bot.vy = pick.y;
+                    }
+                    stampAerosolInkDrop(layerCtx, bot.x, bot.y, bot.color, bot.radius, true);
+                });
+
+                if (botPaintNodes.length > 25000) botPaintNodes.splice(0, 5000);
+                document.getElementById('valX').innerText = Math.round(player.x);
+                document.getElementById('valY').innerText = Math.round(player.y);
+            }
+
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            let camX = canvas.width / 2 - player.x;
+            let camY = canvas.height / 2 - player.y;
+            ctx.drawImage(layerCanvas, camX, camY);
+
+            ctx.strokeStyle = 'rgba(190, 206, 226, 0.4)';
+            ctx.lineWidth = 1;
+            for(let x = Math.floor((-camX)/12)*12; x <= canvas.width-camX+12; x += 12) {
+                ctx.beginPath(); ctx.moveTo(x + camX, 0); ctx.lineTo(x + camX, canvas.height); ctx.stroke();
+            }
+            for(let y = Math.floor((-camY)/12)*12; y <= canvas.height-camY+12; y += 12) {
+                ctx.beginPath(); ctx.moveTo(0, y + camY); ctx.lineTo(canvas.width, y + camY); ctx.stroke();
+            }
+
+            mathAnomalies.forEach(anomaly => {
+                if (anomaly.collected) return;
+                let scrX = anomaly.x + camX; let scrY = anomaly.y + camY;
+                ctx.fillStyle = '#7f8c8d'; ctx.font = "bold 13px monospace";
+                ctx.fillText(anomaly.text, scrX, scrY);
+            });
+
+            if (gameActive) {
+                ctx.fillStyle = '#0f172a';
+                ctx.beginPath(); ctx.arc(canvas.width/2, canvas.height/2, player.radius+1, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = player.color;
+                ctx.beginPath(); ctx.arc(canvas.width/2, canvas.height/2, player.radius, 0, Math.PI*2); ctx.fill();
+                bots.forEach(bot => {
+                    let bx = bot.x + camX; let by = bot.y + camY;
+                    ctx.fillStyle = bot.color;
+                    ctx.beginPath(); ctx.arc(bx, by, bot.radius, 0, Math.PI*2); ctx.fill();
+                });
+            }
+            requestAnimationFrame(loop);
+        }
+        requestAnimationFrame(loop);
+    </script>
+</body>
+</html>
+
